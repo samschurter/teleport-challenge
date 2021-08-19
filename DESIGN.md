@@ -48,7 +48,6 @@ job worker able to operate entirely independently of the HTTP service to isolate
                 "owner": "user@example.com",
                 "startTime": "2020-08-18T12:00:00Z", 
                 "stopTime": "2020-08-18T12:00:00Z" ,
-                "outputExpires": "2020-08-18T12:00:00Z", 
                 "exitCode": 0
             }
             ```
@@ -67,7 +66,6 @@ job worker able to operate entirely independently of the HTTP service to isolate
                 "startTime": "2020-08-18T12:00:00Z", 
                 "jobStatus": "stopped",
                 "stopTime": "2020-08-18T12:00:00Z" ,
-                "outputExpires": "2020-08-18T12:00:00Z", 
                 "exitCode": 0
             }
             ```
@@ -86,7 +84,6 @@ job worker able to operate entirely independently of the HTTP service to isolate
                 "owner": "user@example.com",
                 "startTime": "2020-08-18T12:00:00Z", 
                 "stopTime": "2020-08-18T12:00:00Z" ,
-                "outputExpires": "2020-08-18T12:00:00Z",
                 "exitCode": 0
                 "stderrSize": 123,
                 "stderrBytes": "bytes",
@@ -112,7 +109,6 @@ job worker able to operate entirely independently of the HTTP service to isolate
                         "jobStatus": "stopped",
                         "startTime": "2020-08-18T12:00:00Z", 
                         "stopTime": "2020-08-18T12:00:00Z" ,
-                        "outputExpires": "2020-08-18T12:00:00Z",
                     },
                     {
                         "jobID": 124,
@@ -128,32 +124,12 @@ job worker able to operate entirely independently of the HTTP service to isolate
             ```json
             {"status": 500, "error": "some failure"}
             ```
-        - **POST /take/:jobID** will take ownership of a job away from the user that started it, as long as the 
-        user issuing the command has `admin` access.
-            - Success response: 
-            ```json
-            {
-                "status": 200, 
-                "jobID": 123, 
-                "owner": "admin@example.com",
-                "oldOwner": "user@example.com",
-            }
-            ``` 
-            - Error response: 
-            ```json
-            {"status": 404, "error": "no job found with that id"}
-            {"status": 403, "error": "you are forbidden to take that job: not an admin"}
-            ``` 
-    - *cli*: the CLI tool for managing jobs. Accepts credentials and server address and manages the connection from
-    there.
-        - First command run must be `config`. Will behave similarly to the AWS CLI `config` by setting some default
-        connection and credential info which will be used in subsequent commmands.
-        - Commands will include `start`, `stop`, `status`, `output`, `take`, and `list` just like the HTTP API.
-        These commands will fail if the CLI has not been configured.
+    - *cli*: the CLI tool for managing jobs. Hard-coded credentials and server address.
+        - Commands will include `start`, `stop`, `status`, `output`, and `list` just like the HTTP API.
     - *worker*: The actual Linux service to manage jobs. Using a service is convenient because it provides 
     automatic restarts if the service crashes due to somebody running something that consumes enormous RAM or 
     something.
-        - Exposes the methods for Start, Stop, Status, Output, List, and Take via RPC
+        - Exposes the methods for Start, Stop, Status, Output, List via RPC
 - *Makefile*: will build one or all of the 3 executables
 
 
@@ -168,8 +144,7 @@ all in RAM, but quick to implement. Storing stdout and stderr will be done separ
 them as two separate fields when retreiving output.
 
 Worker will initialize logging, initialize worker hub, and intialize an RPC listener. Worker hub will contain a list
-of all workers and a go routine to occasionally prune workers that have stopped. A worker will be considered stale 
-after it has been stopped for 1 hour and its output will be discarded.
+of all workers.
 
 Job type will include the job owner id, the command that started it, times for different events such as start 
 and finish, byte slices of stderr and stdout and other relevant information required by the API and CLI. Listener
@@ -178,25 +153,22 @@ owned by the users passed in as an argument, or all if there are no users passed
 
 Each job will be protected by a mutex to prevent conflicting commands.
 
-The hub will have a map of jobID to jobs. The map will also be protected by a mutex to prevent simultaneous access.
+The hub will have a map of jobID to jobs. The length of this map will be used to generate the next jobID. The map will 
+also be protected by a mutex to prevent simultaneous access.
 
 ### API
 Will use the `net/http` package for ease of use and fast development. Server will be configured for mTLS with TLS
-version 1.3 only and a small set of ciphers. The HTTP server will verify the client TLS certificates and 
-middleware will perform the authorization before passing requests off to the handlers. As there are only 6 
-endpoints, no third-party mux will be used and path variables will be parsed manually.
+version 1.3 only. The HTTP server will have a locally generated CA cert to validate the client TLS certificates, and 
+middleware will perform the authorization based on the certificate's Subject field before passing requests off to the 
+handlers. As there are only 5 endpoints, no third-party mux will be used and path variables will be parsed manually.
 
 ### CLI
-The CLI will be built with the `github.com/spf13/cobra` library for fast development. A `config` command will be
-provided to allow the user to configure default credentials once instead of passing them with every command. 
-This configuration will be stored in a file, but the file will be automatically generated and will require no 
-management by the user. 
+The CLI will be built with the `github.com/spf13/cobra` library for fast development. Server address and credentials 
+will be hard-coded for simplicity. The CLI will communicate with the HTTP server configured for TLS. THe client will
+have the same CA cert in its cert pool for validating server certificates.
 
 #### Examples
 ```
-> alps config host 127.0.0.1:443
-> alps config ca ca-cert.pem
-> alps config user cert.pem key.pem
 > alps start `cd /var/log && ls -lh`
 Started Job 123 for user@example.com
 > alps stop 123
@@ -229,6 +201,8 @@ be designed, but this will speed development.
 the amount of time available for development.
 - The API will only be implementing a simple mTLS authentication and will not, for example, be checking certificate
 revocation lists.
+- The jobID is only a counter and could be vulnerable to sequential id attacks. It should probably be a UUID in a real 
+application
 
 ## Plan
 Develop in 3 phases. 
