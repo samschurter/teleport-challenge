@@ -3,24 +3,20 @@ Because every Go package requires a clever 4-letter acronym.
 
 ## Structure
 Minimum Go version will be 1.16 because that's what's installed on my machine, and Go modules will be used for dependency 
-management. The overall architecture of the example program implementing the ALPS library will be 3 separate 
-binaries. It could be done in one binary, with the job worker also providing the HTTPS server, and providing the
-CLI commands by checking to see if the job worker is already running first before launching a new worker. However,
-I think that designing it with this structure provides for a clean, simple implementation, provides a separation 
-of concerns, and makes future extensibility easier. For example, it's likely that a feature such as scheduling 
-jobs which occur in the future or are recurring would be developed. In that case, it would be best to have the 
-job worker able to operate entirely independently of the HTTP service to isolate it from failures.
+management. The overall architecture of the example program implementing the ALPS library will be 2 separate 
+binaries. It could be done in one binary, with the job worker also providing the CLI commands by checking to see if the 
+job worker is already running first before launching a new worker or just responding to commands. However, I think that 
+designing it with this structure provides for a clean, simple implementation, provides a separation of concerns, and 
+makes future extensibility easier. 
 
 - *pkg*
-    - *ipc*: types and methods required for inter-process communication.
     - *log*: implement a common logging interface accross all components. This will not be developed from scratch,
     just adapt the logger used in other projects
     - *alps*: library code for creating and listening to Arbitrary Linux Process Service.
 - *cmd*
-    - *api*: HTTP API server using mTLS authentication with ACL authorization. Will communicate with the job 
-    worker via RPC. Authentication and authorization will be done via middleware. Any endpoint will return 
-    `{"status": 401, "error": "you are not authorized to perform that action"}` if the request does not have a recognized
-    user.
+    - *api*: HTTP API server using mTLS authentication with ACL authorization.  Authentication and authorization will be 
+    done via middleware. Any endpoint will return `{"status": 401, "error": "you are not authorized to perform that 
+    action"}` if the request does not have a recognized user.
         - **POST /start** starts a process and returns an ID to use for getting output and control
             - Request: 
             ```json
@@ -65,102 +61,56 @@ job worker able to operate entirely independently of the HTTP service to isolate
                 "owner": "user@example.com",
                 "startTime": "2020-08-18T12:00:00Z", 
                 "jobStatus": "stopped",
-                "stopTime": "2020-08-18T12:00:00Z" ,
-                "exitCode": 0
-            }
-            ```
-            - Error response: 
-            ```json
-            {"status": 404, "error": "no job found with that ID"}
-            ```
-        - **GET /output/:jobID** returns the output of a job
-            - Success response:
-            ```json
-            {
-                "status": 200, 
-                "jobID": 123, 
-                "job": "ls -lh /var/log",
-                "jobStatus": "stopped",
-                "owner": "user@example.com",
-                "startTime": "2020-08-18T12:00:00Z", 
-                "stopTime": "2020-08-18T12:00:00Z" ,
-                "exitCode": 0
-                "stderrSize": 123,
-                "stderrBytes": "bytes",
+                "stopTime": "2020-08-18T12:00:00Z",
                 "stdoutSize": 321,
-                "stdoutBytes": "more bytes"
+                "stderrSize": 123,
+                "exitCode": 0
             }
             ```
             - Error response: 
             ```json
             {"status": 404, "error": "no job found with that ID"}
             ```
-        - **GET /list** gets a list of all of the user's jobs and their status. Will not return jobs 
-        the user does not own.
-            - Success response:
-            ```json
-            {
-                "status": 200, 
-                "jobs": [
-                    {
-                        "jobID": 123,
-                        "job": "ls -lh /var/log",
-                        "owner": "user@example.com",
-                        "jobStatus": "stopped",
-                        "startTime": "2020-08-18T12:00:00Z", 
-                        "stopTime": "2020-08-18T12:00:00Z" ,
-                    },
-                    {
-                        "jobID": 124,
-                        "job": "ticker -interval=1m",
-                        "owner": "user@example.com",
-                        "jobStatus": "running",
-                        "startTime": "2020-08-18T12:00:00Z", 
-                    }
-                ]
-            }
-            ```
-            - Error response: 
-            ```json
-            {"status": 500, "error": "some failure"}
-            ```
-    - *cli*: the CLI tool for managing jobs. Hard-coded credentials and server address.
-        - Commands will include `start`, `stop`, `status`, `output`, and `list` just like the HTTP API.
-    - *worker*: The actual Linux service to manage jobs. Using a service is convenient because it provides 
-    automatic restarts if the service crashes due to somebody running something that consumes enormous RAM or 
-    something.
-        - Exposes the methods for Start, Stop, Status, Output, List via RPC
-- *Makefile*: will build one or all of the 3 executables
+        - **GET /stderr/:jobID** returns the stderr of a job
+            - Response: raw bytes
+        - **GET /stdout/:jobID** returns the stdout of a job
+            - Response: raw bytes 
+    - *cli*: the CLI tool for managing jobs. Hard-coded paths to credential files and server address.
+        - Commands will include `start`, `stop`, `status`, and `output` just like the HTTP API.
+- *Makefile*: will build one or both of the executables
 
 
 ### Worker
-The job worker will make use of `net/rpc` for communicating with the HTTP server. The package is in feature lock, but 
-provides an easy interface for IPC and development is still current. There have been new commits to the package that
-will be included in the Go 1.17 release. Using Unix domain sockets will allow pretty low latency and is supported by 
-net/rpc. Better performance could be possible, but won't be necessary for this example. 
-
 The `os/exec` package allows capturing stdout/stderr directly and store it in the job. Not memory efficient to keep it 
 all in RAM, but quick to implement. Storing stdout and stderr will be done separately to allow the user to get get 
 them as two separate fields when retreiving output.
 
-Worker will initialize logging, initialize worker hub, and intialize an RPC listener. Worker hub will contain a list
-of all workers.
+Worker will initialize logging, initialize worker hub. Worker hub will contain a list of all workers.
 
 Job type will include the job owner id, the command that started it, times for different events such as start 
-and finish, byte slices of stderr and stdout and other relevant information required by the API and CLI. Listener
-will make a few methods available via RPC for use by the API and CLI clients. The List method will only list jobs
-owned by the users passed in as an argument, or all if there are no users passed in.
+and finish, byte slices of stderr and stdout and other relevant information required by the API and CLI. 
 
-Each job will be protected by a mutex to prevent conflicting commands.
+Each job will be protected by a mutex to prevent conflicting commands. The jobID will be a UUIDv4 to prevent collisions 
+and sequential ID attacks.
 
-The hub will have a map of jobID to jobs. The length of this map will be used to generate the next jobID. The map will 
-also be protected by a mutex to prevent simultaneous access.
+The hub will have a map of jobID to jobs. The map will also be protected by a mutex to prevent simultaneous access.
 
 ### API
 Will use the `net/http` package for ease of use and fast development. Server will be configured for mTLS with TLS
 version 1.3 only. The HTTP server will have a locally generated CA cert to validate the client TLS certificates, and 
-middleware will perform the authorization based on the certificate's Subject field before passing requests off to the 
+middleware will perform the ACL authorization based on the certificate's Subject field before passing requests off to the 
 handlers. As there are only 5 endpoints, no third-party mux will be used and path variables will be parsed manually.
+
+#### Authentication
+There will be one CA cert generated to sign all the other certs.
+Then I will construct a TLSConfig with the CA certificate provided in the ClientCAs CertPool, MinVersion set to 1.3, 
+and ClientAuth set to RequireAndVerifyClientCert. Then a server will be started with ListenAndServeTLS passing in the 
+server certificate and secret key. That will leave the Go server to validate and accept or reject the connection.
+
+If the connection is accepted and the server believes the certificate from the client is valid, then all requests will 
+pass through an authorization middleware. That will extract the tls.ConnectionState from the http.Request and check the 
+Subject field of the first PeerCertificate. The Organization from the subject will be checked against a hardcoded list 
+of usernames and routes. If the username is not allowed to access that route, then the request will be rejected.
 
 ### CLI
 The CLI will be built with the `github.com/spf13/cobra` library for fast development. Server address and credentials 
@@ -186,9 +136,8 @@ and authorization) of the HTTP API.
 ## Tradeoffs
 - The API will use a hard-coded "access control list" which really just consists of a few usernames mapped to access
 levels. This will not be production ready and would require a lot more consideration as well as persistence.
-- The `list` and `output` endpoints/commands will be extremely basic and will not implmement any sort of 
-pagination or windowing. The assumption will be that the ouput will be of manageable size and the list of jobs
-will be small.
+- The `output` endpoint/command will be extremely basic and will not implmement any sort of pagination or windowing. 
+The assumption will be that the ouput will be of manageable size and the list of jobs will be small.
 - The CLI for this application would be a good candidate for an interactive shell tool, but implementing that would
 add too much development overhead.
 - There will be no persistence in the job worker. If it crashes, all running jobs along with output will be lost.
@@ -201,11 +150,10 @@ be designed, but this will speed development.
 the amount of time available for development.
 - The API will only be implementing a simple mTLS authentication and will not, for example, be checking certificate
 revocation lists.
-- The jobID is only a counter and could be vulnerable to sequential id attacks. It should probably be a UUID in a real 
-application
+
 
 ## Plan
 Develop in 3 phases. 
-- Implement the worker. This will require setting up the ALPS library and all the IPC procedures
+- Implement the worker library.
 - Implement the HTTP API
 - Implement the CLI
