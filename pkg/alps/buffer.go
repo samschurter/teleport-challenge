@@ -10,12 +10,6 @@ type safeBuffer struct {
 	mu  sync.Mutex
 }
 
-// func (sb *safeBuffer) Read(p []byte) (int, error) {
-// 	sb.mu.Lock()
-// 	defer sb.mu.Unlock()
-// 	return sb.buf.Read(p)
-// }
-
 func (sb *safeBuffer) Write(p []byte) (int, error) {
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
