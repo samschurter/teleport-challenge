@@ -63,6 +63,7 @@ func (h *Hub) AddJob(owner, cmd string, args ...string) (*Job, error) {
 }
 
 // StopJob sends a kill signal to the process and waits for the process to exit.
+// Context can be provided with a timeout or deadline to prevent getting stuck waiting for a hung process to exit.
 // Returns an error if the job does not exist or is already stopped.
 func (h *Hub) StopJob(id string, ctx context.Context) error {
 	h.mu.RLock()

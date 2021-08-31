@@ -2,6 +2,7 @@ package alps
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -72,10 +73,15 @@ func (j *Job) StopTime() time.Time {
 	return j.stopTime
 }
 
-func (j *Job) ExitCode() int {
+// ExitCode returns the job's exit code and OK if it's available, or -1 and false if it is not.
+// returns -1 even if the exit code is not available to match the behavior of (*Cmd).ProcessState.ExitCode()
+func (j *Job) ExitCode() (int, bool) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
-	return *j.exitCode
+	if j.exitCode == nil {
+		return -1, false
+	}
+	return *j.exitCode, true
 }
 
 func (j *Job) StdOut() []byte {
@@ -133,9 +139,8 @@ func (j *Job) start() error {
 }
 
 func (j *Job) wait() {
-	// ignore the error as we don't really care. the ProcessState will have the exitCode either way
+	// ignore the error as we don't really care why the process exited. the ProcessState will have the exitCode either way
 	j.cmd.Wait()
-
 	// as soon as the process has exited, acquire a lock before proceeding
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -147,23 +152,21 @@ func (j *Job) wait() {
 }
 
 func (j *Job) stop() error {
-
 	j.mu.Lock()
 	defer j.mu.Unlock()
-
-	// in case something went wrong, check that the process has not exited in addition to the job status
-	if j.status == Stopped || (j.cmd.ProcessState != nil && j.cmd.ProcessState.Exited()) {
+	if j.status == Stopped {
 		return ErrAlreadyStopped
 	}
 
 	// there is a slight chance the process will have exited on it's own between checking process state and calling kill
 	// in that case, stop() will return an error.
-
+	var errFinished = errors.New("os: process already finished")
 	err := j.cmd.Process.Kill()
-	if err != nil {
+	if errors.As(err, &errFinished) {
+		return ErrAlreadyStopped
+	} else if err != nil {
 		return err
 	}
-
 	return nil
 }
 

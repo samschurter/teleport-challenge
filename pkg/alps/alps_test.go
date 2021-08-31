@@ -65,7 +65,7 @@ func testStopJob(t *testing.T, hub *alps.Hub) func(*testing.T) {
 		t.Parallel()
 		job, _ := hub.AddJob("sam", "sleep", "1")
 		// test that a job stops properly
-		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*500)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*1000)
 		defer cancel()
 		err := hub.StopJob(job.ID, ctx)
 		if err != nil {
@@ -74,8 +74,12 @@ func testStopJob(t *testing.T, hub *alps.Hub) func(*testing.T) {
 		if job.Status() != alps.Stopped {
 			t.Errorf("job.Status() = %v; want %v", job.Status(), alps.Stopped)
 		}
-		if job.ExitCode() != -1 {
-			t.Errorf("job.ExitCode() = %d; want %d", job.ExitCode(), -1)
+		ec, ok := job.ExitCode()
+		if !ok {
+			t.Errorf("job.ExitCode() ok = %t; want %t", ok, true)
+		}
+		if ec != -1 {
+			t.Errorf("job.ExitCode() = %d; want %d", ec, -1)
 		}
 		if job.StopTime().IsZero() {
 			t.Errorf("job.StopTime() = %v; want not zero", job.StopTime())
