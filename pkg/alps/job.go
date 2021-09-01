@@ -52,7 +52,7 @@ type Job struct {
 
 // CommandString returns the entire command with arguments used to start the job
 func (j *Job) CommandString() string {
-	return j.command + strings.Join(j.args, " ")
+	return j.command + " " + strings.Join(j.args, " ")
 }
 
 func (j *Job) Status() JobStatus {
