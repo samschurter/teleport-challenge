@@ -9,13 +9,16 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"time"
+
+	gcontext "github.com/gorilla/context"
+	"github.com/gorilla/mux"
 
 	"github.com/samschurter/teleport-challenge/pkg/alps"
 )
 
 func main() {
-	fmt.Println("starting main")
 
 	caFile := flag.String("ca", "certs/ca.crt", "")
 	certFile := flag.String("crt", "certs/server.crt", "")
@@ -35,7 +38,6 @@ func main() {
 	r.HandleFunc("/stderr/{id}", js.stderr).Methods(http.MethodGet)
 
 	r.Use(authorizationMiddleware)
-	log.Println("making config")
 	tlsConf, err := makeConfig(*caFile, *certFile, *keyFile)
 	if err != nil {
 		log.Fatal(err)
@@ -55,7 +57,6 @@ func main() {
 
 func authorizationMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("in middleware")
 		certs := r.TLS.PeerCertificates
 		if len(certs) == 0 {
 			httpError(w, "unauthorized: no certs found", http.StatusUnauthorized)
@@ -80,15 +81,37 @@ func authorizationMiddleware(next http.Handler) http.Handler {
 }
 
 func authorized(path, org string) bool {
-	fmt.Printf("path: %s; org: %s\n", path, org)
+
 	acl := map[string][]string{
-		"path": {
+		`\/start`: {
+			"samschurter@makeict.org",
+		},
+		`\/status/.*`: {
+			"samschurter@makeict.org",
+		},
+		`\/stop\/.*`: {
+			"samschurter@makeict.org",
+		},
+		`\/stdout\/.*`: {
+			"samschurter@makeict.org",
+		},
+		`\/stderr\/.*`: {
 			"samschurter@makeict.org",
 		},
 	}
 
-	users, ok := acl[path]
-	if !ok {
+	var users []string
+	for p, u := range acl {
+		matched, err := regexp.MatchString(p, path)
+		if err != nil {
+			log.Printf("failed to match string: %v", err)
+		}
+		if matched {
+			users = u
+			break
+		}
+	}
+	if len(users) == 0 {
 		return false
 	}
 

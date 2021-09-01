@@ -81,16 +81,22 @@ func (s *jobServer) stop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-
-	err := s.hub.StopJob(id, ctx)
+	job, err := s.hub.GetJob(id)
 	if err != nil {
 		httpError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	job, err := s.hub.GetJob(id)
+	user := gcontext.Get(r, "user").(string)
+	if job.Owner != user {
+		httpError(w, "unauthorized: you do not own this job", http.StatusUnauthorized)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	err = s.hub.StopJob(id, ctx)
 	if err != nil {
 		httpError(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -118,6 +124,12 @@ func (s *jobServer) status(w http.ResponseWriter, r *http.Request) {
 	job, err := s.hub.GetJob(id)
 	if err != nil {
 		httpError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	user := gcontext.Get(r, "user").(string)
+	if job.Owner != user {
+		httpError(w, "unauthorized: you do not own this job", http.StatusUnauthorized)
 		return
 	}
 
@@ -153,6 +165,12 @@ func (s *jobServer) stdout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	user := gcontext.Get(r, "user").(string)
+	if job.Owner != user {
+		httpError(w, "unauthorized: you do not own this job", http.StatusUnauthorized)
+		return
+	}
+
 	w.Write(job.StdOut())
 }
 
@@ -167,6 +185,12 @@ func (s *jobServer) stderr(w http.ResponseWriter, r *http.Request) {
 	job, err := s.hub.GetJob(id)
 	if err != nil {
 		httpError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	user := gcontext.Get(r, "user").(string)
+	if job.Owner != user {
+		httpError(w, "unauthorized: you do not own this job", http.StatusUnauthorized)
 		return
 	}
 
